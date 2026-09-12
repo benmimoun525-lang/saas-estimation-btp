@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SaaS Estimation BTP - Algérie</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- SheetJS pour l'exportation Excel -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body class="bg-gray-50 font-sans text-gray-800">
+
+    <!-- En-tête -->
+    <header class="bg-blue-700 text-white py-4 px-6 shadow-md flex justify-between items-center">
+        <h1 class="text-2xl font-bold">🏗️ SaaS Estimation BTP (DA)</h1>
+        <button id="btn-logout" onclick="seDeconnecter()" class="hidden bg-red-500 hover:bg-red-600 px-4 py-2 rounded text-sm font-semibold">
+            Déconnexion
+        </button>
+    </header>
+
+    <main class="max-w-6xl mx-auto p-6">
+        <!-- Section Authentification / Connexion -->
+        <section id="sec-auth" class="bg-white p-6 rounded-lg shadow-md max-w-md mx-auto my-12">
+            <h2 class="text-xl font-bold mb-4 text-center">Connexion BTP</h2>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium">Email</label>
+                    <input type="email" id="auth-email" class="w-full border rounded p-2 mt-1" placeholder="votre@email.com">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium">Mot de passe</label>
+                    <input type="password" id="auth-password" class="w-full border rounded p-2 mt-1" placeholder="••••••••">
+                </div>
+                <button type="button" onclick="seConnecter()" class="w-full bg-blue-600 text-white font-bold py-2 rounded hover:bg-blue-700">
+                    Se connecter
+                </button>
+            </div>
+        </section>
+
+        <!-- Section Principale Application -->
+        <section id="sec-app" class="hidden space-y-6">
+            <!-- Formulaire de Upload & Scan -->
+            <div class="bg-white p-6 rounded-lg shadow-md">
+                <h2 class="text-lg font-bold mb-4">Scanner un devis ou bordereau BTP</h2>
+                <div class="flex items-center gap-4">
+                    <input type="file" id="input-file" accept="image/*,application/pdf" class="border p-2 rounded w-full">
+                    <button type="button" onclick="lancerScan()" id="btn-scan" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded whitespace-nowrap">
+                        🔍 Scanner par IA
+                    </button>
+                </div>
+                <div id="status-msg" class="mt-3 text-sm font-semibold"></div>
+            </div>
+
+            <!-- Tableau des Postes Extraits -->
+            <div class="bg-white p-6 rounded-lg shadow-md">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-bold">Postes du devis</h2>
+                    <button type="button" id="btn-export-excel" onclick="exporterExcel()" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded flex items-center gap-2">
+                        📊 Exporter en Excel (.xlsx)
+                    </button>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-gray-100 border-b">
+                                <th class="p-3">N°</th>
+                                <th class="p-3">Désignation</th>
+                                <th class="p-3">Unité</th>
+                                <th class="p-3">Qté</th>
+                                <th class="p-3">P.U. HT (DA)</th>
+                                <th class="p-3">Total HT (DA)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="lignes-body">
+                            <tr><td colspan="6" class="p-4 text-center text-gray-500">Aucun devis scanné pour l'instant.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Section Calculs TVA / TTC (Taux Algérie) -->
+                <div class="mt-6 border-t pt-4 flex flex-col items-end gap-2 text-right">
+                    <div class="text-lg">Total HT : <span id="valeur-total-ht" class="font-bold">0.00</span> DA</div>
+                    <div class="flex items-center gap-2">
+                        <label for="taux-tva" class="font-medium">Taux de TVA :</label>
+                        <select id="taux-tva" onchange="recalculerTotaux()" class="border rounded p-1 bg-white">
+                            <option value="19">19 % (Taux Normal - Algérie)</option>
+                            <option value="9">9 % (Taux Réduit - Algérie)</option>
+                            <option value="0">0 % (Exonéré)</option>
+                        </select>
+                        <span>: <span id="valeur-tva" class="font-bold">0.00</span> DA</span>
+                    </div>
+                    <div class="text-xl font-extrabold text-blue-600">
+                        Total TTC : <span id="valeur-total-ttc">0.00</span> DA
+                    </div>
+                </div>
+            </div>
+
+            <!-- Historique Supabase -->
+            <div class="bg-white p-6 rounded-lg shadow-md">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-bold">Historique des devis enregistrés</h2>
+                    <button type="button" onclick="chargerHistorique()" class="text-blue-600 hover:underline text-sm font-semibold">
+                        🔄 Rafraîchir
+                    </button>
+                </div>
+                <div id="liste-historique" class="space-y-2">
+                    <p class="text-gray-500 text-sm">Chargement de l'historique...</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        // Remplacez par vos vraies valeurs Supabase
+        const SUPABASE_URL = "https://ydkdpnafgogomfisihnd.supabase.co";
+        const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlka2RwbmFmZ29nb21maXNpaG5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4OTY0NzAsImV4cCI6MjEwNDQ3MjQ3MH0.sNNxSJcQP1FriRL-PXU9R6BxcqvjITI0M8coxnCdN4I";
+
+        let tokenAccess = localStorage.getItem("access_token");
+        let postesCourants = [];
+        let totalHTCourant = 0;
+
+        window.onload = function() {
+            if (tokenAccess) {
+                afficherApplication();
+            }
+        };
+
+        async function seConnecter() {
+            const email = document.getElementById("auth-email").value;
+            const password = document.getElementById("auth-password").value;
+
+            try {
+                const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+                    method: "POST",
+                    headers: {
+                        "apikey": SUPABASE_ANON_KEY,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({ email, password })
+                });
+                const data = await res.json();
+
+                if (data.access_token) {
+                    tokenAccess = data.access_token;
+                    localStorage.setItem("access_token", tokenAccess);
+                    afficherApplication();
+                } else {
+                    alert("Erreur de connexion : " + (data.error_description || "Identifiants incorrects"));
+                }
+            } catch (err) {
+                alert("Erreur réseau lors de la connexion.");
+            }
+        }
+
+        function seDeconnecter() {
+            localStorage.clear();
+            location.reload();
+        }
+
+        function gererErreurAuth(res) {
+            if (res.status === 401) {
+                alert("Session expirée. Veuillez vous reconnecter.");
+                seDeconnecter();
+                return true;
+            }
+            return false;
+        }
+
+        function afficherApplication() {
+            document.getElementById("sec-auth").classList.add("hidden");
+            document.getElementById("sec-app").classList.remove("hidden");
+            document.getElementById("btn-logout").classList.remove("hidden");
+            chargerHistorique();
+        }
+
+        async function lancerScan() {
+    const fileInput = document.getElementById("input-file");
+    const statusMsg = document.getElementById("status-msg");
+    const tauxTVA = document.getElementById("taux-tva").value;
+    
+    if (!fileInput.files[0]) {
+        alert("Veuillez sélectionner une image ou un PDF !");
+        return;
+    }
+
+    statusMsg.className = "mt-3 text-sm font-semibold text-blue-600";
+    statusMsg.innerText = "⏳ Scan et extraction par Gemini en cours...";
+
+    const formData = new FormData();
+    formData.append("file", fileInput.files[0]);
+    formData.append("taux_tva", tauxTVA); // Transmet le taux sélectionné
+
+    try {
+        const res = await fetch("/api/scan", {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${tokenAccess}`
+            },
+            body: formData
+        });
+
+        if (gererErreurAuth(res)) return;
+
+        const data = await res.json();
+
+        if (res.ok) {
+            statusMsg.className = "mt-3 text-sm font-semibold text-green-600";
+            statusMsg.innerText = "✔ Scan et enregistrement réussi !";
+            afficherTableau(data);
+            chargerHistorique();
+        } else {
+            statusMsg.className = "mt-3 text-sm font-semibold text-red-600";
+            statusMsg.innerText = "Erreur : " + (data.detail || "Échec du scan");
+        }
+    } catch (err) {
+        statusMsg.className = "mt-3 text-sm font-semibold text-red-600";
+        statusMsg.innerText = "Erreur réseau lors du scan.";
+    }
+}
+
+        function afficherTableau(data) {
+            postesCourants = data.postes || [];
+            totalHTCourant = data.total_ht || 0;
+            
+            const tbody = document.getElementById("lignes-body");
+            tbody.innerHTML = "";
+            
+            if (postesCourants.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="p-4 text-center text-gray-500">Aucun poste extrait.</td></tr>';
+                return;
+            }
+
+            postesCourants.forEach(p => {
+                tbody.innerHTML += `
+                    <tr class="border-b hover:bg-gray-50">
+                        <td class="p-3">${p.numero || '-'}</td>
+                        <td class="p-3 font-medium">${p.designation}</td>
+                        <td class="p-3">${p.unite || '-'}</td>
+                        <td class="p-3">${p.quantite}</td>
+                        <td class="p-3">${Number(p.prix_unitaire_ht).toFixed(2)}</td>
+                        <td class="p-3 font-semibold text-blue-700">${Number(p.prix_total_ht).toFixed(2)}</td>
+                    </tr>
+                `;
+            });
+            
+            recalculerTotaux();
+        }
+
+        function recalculerTotaux() {
+            const taux = parseFloat(document.getElementById("taux-tva").value) / 100;
+            const montantTVA = totalHTCourant * taux;
+            const totalTTC = totalHTCourant + montantTVA;
+            
+            document.getElementById("valeur-total-ht").innerText = totalHTCourant.toFixed(2);
+            document.getElementById("valeur-tva").innerText = montantTVA.toFixed(2);
+            document.getElementById("valeur-total-ttc").innerText = totalTTC.toFixed(2);
+        }
+
+        function exporterExcel() {
+            if (postesCourants.length === 0) {
+                alert("Aucune donnée à exporter ! Effectuez d'abord un scan.");
+                return;
+            }
+            
+            // 1. Postes de travaux
+            const dataExport = postesCourants.map(p => ({
+                "N°": p.numero || "",
+                "Désignation": p.designation,
+                "Unité": p.unite || "",
+                "Quantité": p.quantite,
+                "Prix Unitaire HT (DA)": p.prix_unitaire_ht,
+                "Prix Total HT (DA)": p.prix_total_ht
+            }));
+
+            // 2. Calculs de synthèse avec TVA Algérie
+            const tauxTVA = parseFloat(document.getElementById("taux-tva").value);
+            const montantTVA = totalHTCourant * (tauxTVA / 100);
+            const totalTTC = totalHTCourant + montantTVA;
+
+            // 3. Lignes de totaux
+            dataExport.push({}); // Ligne vide
+            dataExport.push({
+                "Désignation": "TOTAL HT",
+                "Prix Total HT (DA)": Number(totalHTCourant.toFixed(2))
+            });
+            dataExport.push({
+                "Désignation": `TVA (${tauxTVA}%)`,
+                "Prix Total HT (DA)": Number(montantTVA.toFixed(2))
+            });
+            dataExport.push({
+                "Désignation": "TOTAL TTC",
+                "Prix Total HT (DA)": Number(totalTTC.toFixed(2))
+            });
+
+            // 4. Génération et téléchargement du fichier Excel (.xlsx)
+            const worksheet = XLSX.utils.json_to_sheet(dataExport);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Devis BTP");
+            XLSX.writeFile(workbook, "Devis_BTP_Analyse.xlsx");
+        }
+
+        async function chargerHistorique() {
+            const container = document.getElementById("liste-historique");
+            try {
+                const res = await fetch("/api/historique", {
+                    headers: { "Authorization": `Bearer ${tokenAccess}` }
+                });
+
+                if (gererErreurAuth(res)) return;
+
+                const list = await res.json();
+
+                if (!res.ok || list.length === 0) {
+                    container.innerHTML = '<p class="text-gray-500 text-sm">Aucun devis dans l\'historique.</p>';
+                    return;
+                }
+
+                container.innerHTML = "";
+                list.forEach(item => {
+                    const date = new Date(item.created_at).toLocaleDateString("fr-FR");
+                    container.innerHTML += `
+                        <div class="p-3 border rounded flex justify-between items-center hover:bg-gray-50">
+                            <div>
+                                <span class="font-bold">${item.filename}</span>
+                                <span class="text-gray-500 text-sm ml-2">(${date})</span>
+                            </div>
+                            <div class="font-bold text-blue-600">
+                                ${Number(item.total_ht).toFixed(2)} DA HT
+                            </div>
+                        </div>
+                    `;
+                });
+            } catch (err) {
+                container.innerHTML = '<p class="text-red-500 text-sm">Erreur lors de la récupération de l\'historique.</p>';
+            }
+        }
+    </script>
+</body>
+</html>
