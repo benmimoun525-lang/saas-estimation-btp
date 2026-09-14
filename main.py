@@ -16,8 +16,9 @@ logger = logging.getLogger("saas_btp")
 
 # Configuration des variables (Remplacez avec vos vraies valeurs)
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://votre-projet.supabase.co")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "cle_supabase_placeholder")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "ecle_supabase_placeholder")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "cle_gemini_placeholder")
+
 # Initialisation Supabase
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
