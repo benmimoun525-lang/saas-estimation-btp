@@ -8,6 +8,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- SheetJS pour l'exportation Excel -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- SDK Supabase indispensable pour la gestion de session sur mobile -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body class="bg-gray-50 font-sans text-gray-800">
 
@@ -113,50 +115,79 @@
     </main>
 
     <script>
-        // Remplacez par vos vraies valeurs Supabase
-        const SUPABASE_URL = "https://ydkdpnafgogomfisihnd.supabase.co";
-        const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlka2RwbmFmZ29nb21maXNpaG5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4OTY0NzAsImV4cCI6MjEwNDQ3MjQ3MH0.sNNxSJcQP1FriRL-PXU9R6BxcqvjITI0M8coxnCdN4I";
+        const SUPABASE_URL = "https://votre-projet.supabase.co";
+        const SUPABASE_ANON_KEY = "cle_supabase_placeholder";
 
-        let tokenAccess = localStorage.getItem("access_token");
+        // Client Supabase avec configuration de persistance mobile
+        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+            auth: {
+                persistSession: true,
+                autoRefreshToken: true,
+                detectSessionInUrl: true
+            }
+        });
+
+        let tokenAccess = null;
         let postesCourants = [];
         let totalHTCourant = 0;
 
-        window.onload = function() {
-            if (tokenAccess) {
+        // Initialisation de la session au chargement
+        window.onload = async function() {
+            const { data: { session }, error } = await supabaseClient.auth.getSession();
+
+            if (session && !error) {
+                tokenAccess = session.access_token;
+                localStorage.setItem("access_token", tokenAccess);
                 afficherApplication();
+            } else {
+                seDeconnecter();
             }
         };
 
+        // Écouteur de changement d'état d'authentification
+        supabaseClient.auth.onAuthStateChange((event, session) => {
+            if (session) {
+                tokenAccess = session.access_token;
+                localStorage.setItem("access_token", tokenAccess);
+            } else if (event === 'SIGNED_OUT') {
+                localStorage.removeItem("access_token");
+            }
+        });
+
+        // Connexion officielle via le SDK Supabase
         async function seConnecter() {
             const email = document.getElementById("auth-email").value;
             const password = document.getElementById("auth-password").value;
 
-            try {
-                const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
-                    method: "POST",
-                    headers: {
-                        "apikey": SUPABASE_ANON_KEY,
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify({ email, password })
-                });
-                const data = await res.json();
+            if (!email || !password) {
+                alert("Veuillez saisir votre email et votre mot de passe.");
+                return;
+            }
 
-                if (data.access_token) {
-                    tokenAccess = data.access_token;
+            try {
+                const { data, error } = await supabaseClient.auth.signInWithPassword({
+                    email: email,
+                    password: password
+                });
+
+                if (error) {
+                    alert("Erreur de connexion : " + error.message);
+                } else if (data.session) {
+                    tokenAccess = data.session.access_token;
                     localStorage.setItem("access_token", tokenAccess);
                     afficherApplication();
-                } else {
-                    alert("Erreur de connexion : " + (data.error_description || "Identifiants incorrects"));
                 }
             } catch (err) {
                 alert("Erreur réseau lors de la connexion.");
             }
         }
 
-        function seDeconnecter() {
+        async function seDeconnecter() {
+            await supabaseClient.auth.signOut();
             localStorage.clear();
-            location.reload();
+            document.getElementById("sec-app").classList.add("hidden");
+            document.getElementById("btn-logout").classList.add("hidden");
+            document.getElementById("sec-auth").classList.remove("hidden");
         }
 
         function gererErreurAuth(res) {
@@ -176,49 +207,59 @@
         }
 
         async function lancerScan() {
-    const fileInput = document.getElementById("input-file");
-    const statusMsg = document.getElementById("status-msg");
-    const tauxTVA = document.getElementById("taux-tva").value;
-    
-    if (!fileInput.files[0]) {
-        alert("Veuillez sélectionner une image ou un PDF !");
-        return;
-    }
+            const fileInput = document.getElementById("input-file");
+            const statusMsg = document.getElementById("status-msg");
+            const tauxTVA = document.getElementById("taux-tva").value;
+            
+            if (!fileInput.files[0]) {
+                alert("Veuillez sélectionner une image ou un PDF !");
+                return;
+            }
 
-    statusMsg.className = "mt-3 text-sm font-semibold text-blue-600";
-    statusMsg.innerText = "⏳ Scan et extraction par Gemini en cours...";
+            // Récupère toujours le jeton de session actuel au lieu d'une variable figée
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            const token = session ? session.access_token : null;
 
-    const formData = new FormData();
-    formData.append("file", fileInput.files[0]);
-    formData.append("taux_tva", tauxTVA); // Transmet le taux sélectionné
+            if (!token) {
+                alert("Session expirée. Veuillez vous reconnecter.");
+                seDeconnecter();
+                return;
+            }
 
-    try {
-        const res = await fetch("/api/scan", {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${tokenAccess}`
-            },
-            body: formData
-        });
+            statusMsg.className = "mt-3 text-sm font-semibold text-blue-600";
+            statusMsg.innerText = "⏳ Scan et extraction par Gemini en cours...";
 
-        if (gererErreurAuth(res)) return;
+            const formData = new FormData();
+            formData.append("file", fileInput.files[0]);
+            formData.append("taux_tva", tauxTVA);
 
-        const data = await res.json();
+            try {
+                const res = await fetch("/api/scan", {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${token}`
+                    },
+                    body: formData
+                });
 
-        if (res.ok) {
-            statusMsg.className = "mt-3 text-sm font-semibold text-green-600";
-            statusMsg.innerText = "✔ Scan et enregistrement réussi !";
-            afficherTableau(data);
-            chargerHistorique();
-        } else {
-            statusMsg.className = "mt-3 text-sm font-semibold text-red-600";
-            statusMsg.innerText = "Erreur : " + (data.detail || "Échec du scan");
+                if (gererErreurAuth(res)) return;
+
+                const data = await res.json();
+
+                if (res.ok) {
+                    statusMsg.className = "mt-3 text-sm font-semibold text-green-600";
+                    statusMsg.innerText = "✔ Scan et enregistrement réussi !";
+                    afficherTableau(data);
+                    chargerHistorique();
+                } else {
+                    statusMsg.className = "mt-3 text-sm font-semibold text-red-600";
+                    statusMsg.innerText = "Erreur : " + (data.detail || "Échec du scan");
+                }
+            } catch (err) {
+                statusMsg.className = "mt-3 text-sm font-semibold text-red-600";
+                statusMsg.innerText = "Erreur réseau lors du scan.";
+            }
         }
-    } catch (err) {
-        statusMsg.className = "mt-3 text-sm font-semibold text-red-600";
-        statusMsg.innerText = "Erreur réseau lors du scan.";
-    }
-}
 
         function afficherTableau(data) {
             postesCourants = data.postes || [];
@@ -264,7 +305,6 @@
                 return;
             }
             
-            // 1. Postes de travaux
             const dataExport = postesCourants.map(p => ({
                 "N°": p.numero || "",
                 "Désignation": p.designation,
@@ -274,13 +314,11 @@
                 "Prix Total HT (DA)": p.prix_total_ht
             }));
 
-            // 2. Calculs de synthèse avec TVA Algérie
             const tauxTVA = parseFloat(document.getElementById("taux-tva").value);
             const montantTVA = totalHTCourant * (tauxTVA / 100);
             const totalTTC = totalHTCourant + montantTVA;
 
-            // 3. Lignes de totaux
-            dataExport.push({}); // Ligne vide
+            dataExport.push({});
             dataExport.push({
                 "Désignation": "TOTAL HT",
                 "Prix Total HT (DA)": Number(totalHTCourant.toFixed(2))
@@ -294,7 +332,6 @@
                 "Prix Total HT (DA)": Number(totalTTC.toFixed(2))
             });
 
-            // 4. Génération et téléchargement du fichier Excel (.xlsx)
             const worksheet = XLSX.utils.json_to_sheet(dataExport);
             const workbook = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(workbook, worksheet, "Devis BTP");
@@ -303,9 +340,19 @@
 
         async function chargerHistorique() {
             const container = document.getElementById("liste-historique");
+            
+            // Récupère dynamiquement la session active
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            const token = session ? session.access_token : null;
+
+            if (!token) {
+                container.innerHTML = '<p class="text-gray-500 text-sm">Session expirée.</p>';
+                return;
+            }
+
             try {
                 const res = await fetch("/api/historique", {
-                    headers: { "Authorization": `Bearer ${tokenAccess}` }
+                    headers: { "Authorization": `Bearer ${token}` }
                 });
 
                 if (gererErreurAuth(res)) return;
